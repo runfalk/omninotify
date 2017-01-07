@@ -2,7 +2,7 @@ import json
 import subprocess
 import uuid
 
-from .common import which, expand_path
+from .common import which, expand_path, Response
 from .handlers import HandlerBase
 
 terminal_notifier = which("terminal-notifier")
@@ -13,7 +13,7 @@ if terminal_notifier is None:
 
 class TerminalNotifierHandler(HandlerBase):
     def __init__(self, app_name=None, show_app_name=False):
-        super(MacOsHandler, self).__init__(app_name)
+        super(TerminalNotifierHandler, self).__init__(app_name)
         self.show_app_name = show_app_name
 
     def _message_to_args(self, msg, ref=None):
@@ -60,8 +60,8 @@ class TerminalNotifierHandler(HandlerBase):
             timeoutable = False
 
         # Timeout is not available when the user is presented by an action
-        if msg.timeout is not None and timeoutable:
-            args += ["-timeout", str(msg.timeout)]
+        if timeoutable:
+            args += ["-timeout", "5" if msg.timeout is None else str(msg.timeout)]
 
         # Add group reference so the notification can be removed
         if ref is not None:
@@ -78,6 +78,9 @@ class TerminalNotifierHandler(HandlerBase):
                 return action
 
     def _parse_tn_output(self, msg, output):
+        if not output:
+            return None, None
+
         output = json.loads(output.decode("utf-8"))
 
         # Hack for using the close button as a value when there are two or more
