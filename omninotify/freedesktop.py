@@ -6,24 +6,38 @@ from .common import Response, LimitedSizeDict, coalesce, file_uri
 from .handlers import HandlerBase
 
 try:
-    from pydbus import SessionBus, Variant
-    from gi.repository import GLib
+    from tdbus import SimpleDBusConnection, DBUS_BUS_SESSION, DBusHandler, \
+        signal_handler
 except ImportError:
     raise ImportError(
-        "pydbus and/or gi.repository not available, which makes "
-        "FreedesktopHandler unavailable")
+        "tdbus not available, which makes FreedesktopHandler unavailable")
 
+class TdbusHandler(DBusHandler):
+    def __init__(self, handler):
+        super(TdbusHandler, self).__init__()
+        self.handler = handler
+
+    @signal_handler()
+    def NotificationClosed(self, message):
+        print('signal received: %s, args = %s' % (
+            message.get_member(), repr(message.get_args())))
+        self.handler._handle_closed(*message.get_args())
+
+    @signal_handler()
+    def ActionInvoked(self, message):
+        print('signal received: %s, args = %s' % (
+            message.get_member(), repr(message.get_args())))
+        self.handler._handle_action(*message.get_args())
 
 class FreedesktopHandler(HandlerBase):
     def __init__(self, app_name=None, *args, **kwargs):
         super(FreedesktopHandler, self).__init__(app_name)
 
-        self.session_bus = SessionBus()
-        self.notifications = self.session_bus.get(".Notifications")
+        self.dbus_handler = TdbusHandler(self)
 
-        # Register handlers
-        self.notifications.NotificationClosed.connect(self._handle_closed)
-        self.notifications.ActionInvoked.connect(self._handle_action)
+        self.dbus = SimpleDBusConnection(DBUS_BUS_SESSION)
+        self.dbus.add_handler(self.dbus_handler)
+        self.dbus.subscribe_to_signals()
 
         self.locals = threading.local()
         self.locals.events = LimitedSizeDict(size_limit=10)
@@ -32,64 +46,62 @@ class FreedesktopHandler(HandlerBase):
         # Remember which notification to listen for
         self.locals.wait_for = ref
 
-        # Make the loop available in a thread local so the handlers can stop it
-        self.locals.loop = GLib.MainLoop()
-
         # Implement timeout using a timer since signals are not necessary sent
         # when the notification is hidden
         if timeout is not None:
-            # Run the loop until a timeout is reached or it is cancelled by a
-            # handler
-            def cancel_on_timeout(loop):
-                loop.quit()
+            # Extract thread local since it is used in the Timer thread
+            events = self.locals.events
 
-                # Add the timeout event
-                self.locals.events[self.locals.wait_for] = "timeout"
+            # Callback to set status to timeout and stop event loop
+            def timeout_callback():
+                events[ref] = "timeout"
+                self.dbus.stop()
 
-                # We must return True to ensure that the callback is not removed
-                # until we do it manually further down. If not the
-                return True
+            # Start timeout timer
+            timer = threading.Timer(timeout, timeout_callback)
+            timer.start()
 
-            # Add timer to stop the loop on timeout
-            event_id = GLib.timeout_add_seconds(
-                timeout, cancel_on_timeout, self.locals.loop)
+            # Enter event loop
+            self.dbus.dispatch()
 
-            # Run main loop
-            self.locals.loop.run()
-
-            # Remove timer
-            GLib.source_remove(event_id)
+            # Cancel timer in case it didn't fire, to save context local value
+            timer.cancel()
         else:
-            self.locals.loop.run()
+            self.dbus.dispatch()
 
         # Cleanup
         del self.locals.wait_for
-        del self.locals.loop
 
         return self.locals.events.pop(ref, None)
 
     def _handle_closed(self, ref, reason):
         self.locals.events[ref] = "closed"
-        if self.locals.wait_for == ref:
-            self.locals.loop.quit()
+        if ref == self.locals.wait_for:
+            self.dbus.stop()
 
     def _handle_action(self, ref, action):
         self.locals.events[ref] = action
-        if self.locals.wait_for == ref:
-            self.locals.loop.quit()
+        if ref == self.locals.wait_for:
+            self.dbus.stop()
 
     def _notify(
             self, title=None, text=None, icon=None, ref=None, actions=None,
             hints=None, timeout=None):
-        return self.notifications.Notify(
-            self.app_name,
-            ref or 0,
-            icon or "",
-            title or "",
-            text or "",
-            actions or [],
-            hints or {},
-            timeout or 0)
+        return self.dbus.call_method(
+            "/org/freedesktop/Notifications",
+            "Notify",
+            interface="org.freedesktop.Notifications",
+            destination="org.freedesktop.Notifications",
+            format="susssasa{sv}i",
+            args=(
+                self.app_name,
+                ref or 0,
+                icon or "",
+                title or "",
+                text or "",
+                actions or [],
+                hints or {},
+                timeout or 0)).get_args()[0]
 
     def send(self, msg, wait=False):
         timeout = int(coalesce(msg.timeout, 5) * 1000)
@@ -101,7 +113,7 @@ class FreedesktopHandler(HandlerBase):
             msg.text,
             None if msg.icon is None else file_uri(msg.icon),
             actions=[x for pair in msg.actions for x in pair],
-            # hints={"transient": Variant("b", True)},
+            #hints={"transient": True},
             timeout=timeout)
 
         if wait:
@@ -109,3 +121,7 @@ class FreedesktopHandler(HandlerBase):
                 self, ref, self._wait_for(
                     ref, None if timeout is None else timeout / 1000.0))
         return Response(self, ref)
+
+    def close(self):
+        self.dbus.remove_handler(self.dbus_handler)
+        self.dbus.close()

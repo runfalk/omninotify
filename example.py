@@ -15,7 +15,7 @@ simple = Message(u"This is a simple notification")
 msg = Message(u"Title", u"Message")
 
 # Simple message with title and icon
-icon = Message(u"Title", u"Message", "path/to/icon.png")
+icon = Message(u"Title", u"Message", "~/.weechat/weechat.png")
 
 # The same with home directory expansion
 home_icon = Message(u"Title", u"Message", "~/icon.png")
@@ -33,7 +33,7 @@ question = Message(u"Question", u"Will you switch to Python 3?", actions=[
 # On macOS it is possible to use the reply action which allows the user to write
 # a reply directly in the notification bubble. This will degrade to just showing
 # the notification when using other handlers.
-reply = Message(u"TheFriend", u"Hey man, how you doing", reply=True)
+reply = Message(u"TheFriend", u"Hey man, how you doin'?", reply=True)
 
 # Construct a notification handler with the given application name. If there are
 # no available handlers and allow_null_handler is False an exception will be
@@ -43,4 +43,4 @@ h = notification_handler("Weechat", allow_null_handler=False)
 
 # To send the message, just call send on the handler. If wait is True (default
 # False) the method will block until the notification disappears
-print(h.send(question, wait=True))
+print(h.send(icon, wait=True))

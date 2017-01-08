@@ -10,7 +10,10 @@ class HandlerBase(object):
     def send(self, msg, wait=False):
         raise NotImplementedError("send not implemented")
 
-    def close(self, ref):
+    def dismiss(self, ref):
+        raise NotImplementedError("dismiss not implemented")
+
+    def close(self):
         pass
 
 
@@ -20,7 +23,7 @@ class NullHandler(HandlerBase):
     def send(self, msg, wait=False):
         pass
 
-    def close(self, ref):
+    def dismiss(self, ref):
         pass
 
 
@@ -31,5 +34,8 @@ class MultiHandler(HandlerBase):
     def send(self, msg, wait=None):
         return [h.send(msg, wait) for h in self.handlers if h.supported]
 
-    def close(self, ref):
-        return [h.close(ref) for h in self.handlers if h.supported]
+    def dismiss(self, ref):
+        return [h.dismiss(ref) for h in self.handlers if h.supported]
+
+    def close(self):
+        return [h.close() for h in self.handlers if h.supported]

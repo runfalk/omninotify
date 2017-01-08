@@ -11,7 +11,7 @@ setup(
     packages=["omninotify"],
     extras_require={
         ":sys_platform == 'linux2'": [
-            "pydbus",
+            "python-tdbus",
         ]
     },
 )
